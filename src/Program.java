@@ -95,18 +95,63 @@ public class Program {
         }
 
         // initial population fitness value
-        int[] fitness = new int[population];
+        double[] fitness = new double[population];
         for(int i = 0; i < population; ++i) {
             fitness[i] = fitness(pop[i], data, v);
         }
 
-        // GA
+        // GA iteration
         for(int it = 0; it < ITERATIONS; ++it) {
 
             // selection
+            double FMAX = Double.MIN_VALUE, FMIN = Double.MAX_VALUE;
+            for(double f : fitness) {
+                FMAX = Math.max(FMAX, f);
+                FMIN = Math.min(FMIN, f);
+            }
+            double[] adjFitness = new double[fitness.length];
+            double sum = 0;
+            for(int i = 0; i < fitness.length; ++i) {
+                double a = H / (FMAX - FMIN);
+                adjFitness[i] = a * fitness[i] + 1 - a;
+                sum += adjFitness[i];
+            }
+            int p1 = 0;
+            Random rand = new Random();
+            double r = rand.nextDouble();
+            for(int i = 0, acc = 0; i < fitness.length; ++i) {
+                if(r <= (acc += fitness[i]) / sum) {
+                    p1 = i;
+                }
+            }
+            int p2 = p1;
+            while(p2 == p1) {
+                r = rand.nextDouble();
+                for(int i = 0, acc = 0; i < fitness.length; ++i) {
+                    if(r <= (acc += fitness[i]) / sum) {
+                        p2 = i;
+                    }
+                }
+            }
+
+            // crossover and mutation
+            boolean[] offSpring1 = new boolean[data[0].length];
+            boolean[] offSpring2 = new boolean[data[0].length];
+            for(int i = 0; i < data[0].length; ++i) {
+                if(data[p1][i] == data[p2][i]) {
+                    offSpring1[i] = data[p1][i];
+                    offSpring2[i] = data[p1][i];
+                } else {
+                    offSpring1[i] = rand.nextInt(2) == 1;
+                    offSpring2[i] = rand.nextInt(2) == 1;
+                }
+                offSpring1[i] = rand.nextDouble() <= MUTATION_PROB != offSpring1[i];
+                offSpring2[i] = rand.nextDouble() <= MUTATION_PROB != offSpring2[i];
+            }
+
+            // replacement
 
         }
-
     }
 
     private static int[] genChromo(int maxReg, int len, int v) {
@@ -127,25 +172,43 @@ public class Program {
     }
 
     private static boolean exist(int[][] pop, int[] tmp) {
-        for(int[] p : pop) {
-            boolean f = false;
-            for(int i = 0; i < pop.length; ++i) {
-                if(tmp[i] != p[i]) {
-                    f = true;
-                    break;
+        for(int i = 0; i < pop.length && pop[i] != null; ++i) {
+            boolean exist = true;
+            if(pop[i].length == tmp.length) {
+                for(int j = 0; j < pop[i].length; ++j) {
+                    if(tmp[j] != pop[i][j]) {
+                        exist = false;
+                        break;
+                    }
                 }
+            } else {
+                exist = false;
             }
-            if(!f) {
-                return false;
-            }
+            if(exist) return true;
         }
-        return true;
+        return false;
     }
 
-    private static int fitness(int[] chromo, boolean[][] data, int v) {
-        for(int i = 1; i < data.length; ++i) {
+    private static double fitness(int[] chromo, boolean[][] data, int v) {
+        Map<BitSet, Integer> map= new HashMap<>();
+        int tie = 0;
+        for(int i = 0; i < data.length - 1; ++i) {
             BitSet b = new BitSet(chromo.length);
+            for(int j = 0; j < chromo.length; ++j) {
+                if(data[i][chromo[j]]) {
+                    b.flip(j);
+                }
+            }
+            int prediction = data[i + 1][v] ? 1 : 0;
+            if(map.containsKey(b)) {
+                map.put(b, -1);
+                ++tie;
+            } else {
+                map.put(b, prediction);
+            }
         }
+        double C = (map.size() - tie) / (data.length - 1);
+        return 1 / ((1 - C) * GAMA + chromo.length);
     }
 
 }
