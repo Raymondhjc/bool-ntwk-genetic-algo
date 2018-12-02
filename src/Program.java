@@ -71,7 +71,9 @@ public class Program {
                     }
 
                     // start genetic algorithm
-                    genetic(b);
+                    for(int i = 0; i < N; ++i) {
+                        genetic(b, POPULATION, MAX_REG_NUM, i);
+                    }
                 }
 
             } catch(Exception e) {
@@ -80,8 +82,70 @@ public class Program {
         }
     }
 
-    private static void genetic(boolean[][] dataset) {
+    private static void genetic(boolean[][] data, int population, int maxReg, int v) {
+        // initial population
+        int[][] pop = new int[population][];
+        for(int i = 0; i < population; ++i) {
+            int[] tmp = genChromo(maxReg, data.length, v);
+            if(exist(pop, tmp)) {
+                --i;
+            } else {
+                pop[i] = tmp;
+            }
+        }
 
+        // initial population fitness value
+        int[] fitness = new int[population];
+        for(int i = 0; i < population; ++i) {
+            fitness[i] = fitness(pop[i], data, v);
+        }
+
+        // GA
+        for(int it = 0; it < ITERATIONS; ++it) {
+
+            // selection
+
+        }
+
+    }
+
+    private static int[] genChromo(int maxReg, int len, int v) {
+        int num = new Random().nextInt(maxReg) + 1;
+        int[] chromosome = new int[num];
+        Set<Integer> set = new HashSet<>();
+        for(int i = 0; i < num; ++i) {
+            Random r = new Random();
+            int rand = r.nextInt(len);
+            while(set.contains(rand) || rand == v) {
+                rand = r.nextInt(len);
+            }
+            set.add(rand);
+            chromosome[i] = rand;
+        }
+        Arrays.sort(chromosome);
+        return chromosome;
+    }
+
+    private static boolean exist(int[][] pop, int[] tmp) {
+        for(int[] p : pop) {
+            boolean f = false;
+            for(int i = 0; i < pop.length; ++i) {
+                if(tmp[i] != p[i]) {
+                    f = true;
+                    break;
+                }
+            }
+            if(!f) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static int fitness(int[] chromo, boolean[][] data, int v) {
+        for(int i = 1; i < data.length; ++i) {
+            BitSet b = new BitSet(chromo.length);
+        }
     }
 
 }
