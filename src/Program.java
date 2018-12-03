@@ -9,7 +9,12 @@ public class Program {
     final static int H = 3;
     final static int ITERATIONS = 1000;
     // mutation probability, 1/PROB
-    final static int MUTATION_PROB = 100;
+    final static double MUTATION_PROB = 0.01;
+    final static double MIN_MUTUAL_INFO = 0.05;
+
+    // evaluations
+    static double dynamicsAccuracy = Double.MIN_VALUE;
+    static double structuralAccuracy = Double.MIN_VALUE;
 
     public static void main(String args[]) {
         File file = new File("config.cfg");
@@ -28,6 +33,7 @@ public class Program {
 
         for(String name : names) {
             String st;
+            System.out.println(name.split("-")[1]);
             try {
                 br = new BufferedReader(new FileReader("files/" + name));
 
@@ -70,10 +76,22 @@ public class Program {
                         }
                     }
 
+                    // calculate mutual information
+                    double[][] MI = mi(b);
+
+                    int[][] network = new int[N][];
                     // start genetic algorithm
+                    double c = 0;
                     for(int i = 0; i < N; ++i) {
-                        genetic(b, POPULATION, MAX_REG_NUM, i);
+                        network[i] = genetic(b, POPULATION, MAX_REG_NUM, MI[i], i);
+//                        System.out.println("for gene G" + i);
+//                        for(int g : network[i]) {
+//                            System.out.print(g + " ");
+//                        }
+//                        System.out.print("\n");
+                        c += consistency(network[i], b, i);
                     }
+                    System.out.println("Dynamics consistency is : ---- " + c / N);
                 }
 
             } catch(Exception e) {
@@ -82,15 +100,28 @@ public class Program {
         }
     }
 
-    private static void genetic(boolean[][] data, int population, int maxReg, int v) {
+    private static int[] genetic(boolean[][] data, int population, int maxReg, double[] mi, int v) {
+
+        // if the gene v is a self-regulatory gene
+        int count = 0, self = 0;
+        for(int i = 0; i < mi.length; ++i) {
+            if(mi[i] >= MIN_MUTUAL_INFO) {
+                ++count;
+                self = i;
+            }
+        }
+        if(count <= 1 && self == v) {
+            return new int[]{v};
+        }
+
         // initial population
         int[][] pop = new int[population][];
         for(int i = 0; i < population; ++i) {
-            int[] tmp = genChromo(maxReg, data.length, v);
-            if(exist(pop, tmp)) {
+            int[] chromo = genInitialChromo(maxReg, data[0].length);
+            if(exist(pop, chromo) || !isChomoValid(chromo, maxReg, mi)) {
                 --i;
             } else {
-                pop[i] = tmp;
+                pop[i] = chromo;
             }
         }
 
@@ -104,64 +135,151 @@ public class Program {
         for(int it = 0; it < ITERATIONS; ++it) {
 
             // selection
+            // calculate adjusted fitness value
             double FMAX = Double.MIN_VALUE, FMIN = Double.MAX_VALUE;
             for(double f : fitness) {
                 FMAX = Math.max(FMAX, f);
                 FMIN = Math.min(FMIN, f);
             }
-            double[] adjFitness = new double[fitness.length];
+
+            // TODO convergence
+            if(FMAX == FMIN) {
+                // return the one with best fitness
+                int index = 0;
+                double max = Double.MIN_VALUE;
+                for(int i = 0; i < population; ++i) {
+                    if(fitness[i] > max) {
+                        max = fitness[i];
+                        index = i;
+                    }
+                }
+                System.out.println("iterations:" + it);
+                return pop[index];
+            }
+
+            double[] adjFitness = new double[population];
+
+            // do roulette wheel selection
             double sum = 0;
-            for(int i = 0; i < fitness.length; ++i) {
+            for(int i = 0; i < population; ++i) {
                 double a = H / (FMAX - FMIN);
-                adjFitness[i] = a * fitness[i] + 1 - a;
+                adjFitness[i] = a * fitness[i] + 1 - a * FMIN;
                 sum += adjFitness[i];
             }
+
+            // parents p1 and p2, index of chromosomes (pop[])
             int p1 = 0;
             Random rand = new Random();
             double r = rand.nextDouble();
-            for(int i = 0, acc = 0; i < fitness.length; ++i) {
-                if(r <= (acc += fitness[i]) / sum) {
+            for(int i = 0, acc = 0; i < population; ++i) {
+                if(r <= (acc += adjFitness[i]) / sum) {
                     p1 = i;
+                    break;
                 }
             }
             int p2 = p1;
             while(p2 == p1) {
                 r = rand.nextDouble();
-                for(int i = 0, acc = 0; i < fitness.length; ++i) {
-                    if(r <= (acc += fitness[i]) / sum) {
+                for(int i = 0, acc = 0; i < population; ++i) {
+                    if(r <= (acc += adjFitness[i]) / sum) {
                         p2 = i;
+                        break;
                     }
                 }
             }
 
             // crossover and mutation
-            boolean[] offSpring1 = new boolean[data[0].length];
-            boolean[] offSpring2 = new boolean[data[0].length];
-            for(int i = 0; i < data[0].length; ++i) {
-                if(data[p1][i] == data[p2][i]) {
-                    offSpring1[i] = data[p1][i];
-                    offSpring2[i] = data[p1][i];
-                } else {
-                    offSpring1[i] = rand.nextInt(2) == 1;
-                    offSpring2[i] = rand.nextInt(2) == 1;
+            int n = data[0].length;
+            boolean[] parent1 = new boolean[n];
+            boolean[] parent2 = new boolean[n];
+            for(int i = 0, i1 = 0, i2 = 0; i < n; ++i) {
+                if(i1 < pop[p1].length && i == pop[p1][i1]) {
+                    parent1[i] = true;
+                    ++i1;
                 }
-                offSpring1[i] = rand.nextDouble() <= MUTATION_PROB != offSpring1[i];
-                offSpring2[i] = rand.nextDouble() <= MUTATION_PROB != offSpring2[i];
+                if(i2 < pop[p2].length && i == pop[p2][i2]) {
+                    parent2[i] = true;
+                    ++i2;
+                }
+            }
+
+            boolean[] offSpring1;
+            boolean[] offSpring2;
+            int n1 = 0, n2 = 0;
+            do {
+                offSpring1 = new boolean[n];
+                offSpring2 = new boolean[n];
+                for(int i = 0; i < n; ++i) {
+                    if(parent1[i] == parent2[i]) {
+                        offSpring1[i] = parent1[i];
+                        offSpring2[i] = parent1[i];
+                    } else {
+                        offSpring1[i] = rand.nextInt(2) == 1;
+                        offSpring2[i] = rand.nextInt(2) == 1;
+                    }
+                    // mutation
+                    offSpring1[i] = rand.nextDouble() <= MUTATION_PROB != offSpring1[i];
+                    offSpring2[i] = rand.nextDouble() <= MUTATION_PROB != offSpring2[i];
+
+                    if(offSpring1[i]) {
+                        ++n1;
+                    }
+                    if(offSpring2[i]) {
+                        ++n2;
+                    }
+                }
+            } while(!isChromoValid(offSpring1, maxReg, mi) || !isChromoValid(offSpring2, maxReg, mi));
+
+            int[] c1 = new int[n1];
+            int[] c2 = new int[n2];
+            for(int i = 0, i1 = 0, i2 = 0; i < n; ++i) {
+                if(offSpring1[i]) {
+                    c1[i1++] = i;
+                }
+                if(offSpring2[i]) {
+                    c2[i2++] = i;
+                }
             }
 
             // replacement
-
+            double offSpring1Fitness = fitness(c1, data, v);
+            double offSpring2Fitness = fitness(c2, data, v);
+            if(offSpring1Fitness > fitness[p1]) {
+                pop[p1] = c1;
+                fitness[p1] = offSpring1Fitness;
+            }
+            if(offSpring2Fitness > fitness[p2]) {
+                pop[p2] = c2;
+                fitness[p2] = offSpring2Fitness;
+            }
         }
+
+        // return the one with best fitness
+        int index = 0;
+        double max = Double.MIN_VALUE;
+        for(int i = 0; i < population; ++i) {
+            if(fitness[i] > max) {
+                max = fitness[i];
+                index = i;
+            }
+        }
+
+        return pop[index];
     }
 
-    private static int[] genChromo(int maxReg, int len, int v) {
-        int num = new Random().nextInt(maxReg) + 1;
+    private static int[] genInitialChromo(int maxReg, int len) {
+        // at least 1 and at most maxReg regulatory genes
+        int num = 0;
+        while(num == 0) {
+            num = new Random().nextInt(maxReg) + 1;
+        }
         int[] chromosome = new int[num];
         Set<Integer> set = new HashSet<>();
         for(int i = 0; i < num; ++i) {
             Random r = new Random();
             int rand = r.nextInt(len);
-            while(set.contains(rand) || rand == v) {
+            // can be self regulatory
+            while(set.contains(rand)) {
                 rand = r.nextInt(len);
             }
             set.add(rand);
@@ -190,6 +308,41 @@ public class Program {
     }
 
     private static double fitness(int[] chromo, boolean[][] data, int v) {
+        double C = consistency(chromo, data, v);
+        return 1 / ((1 - C) * GAMA + chromo.length);
+    }
+
+    // is the candidate chromosome valid, check max regulatory gene number and mutual information
+    private static boolean isChomoValid(int[] chromo, int maxReg, double[] mi) {
+        if(chromo.length > maxReg) {
+            return false;
+        }
+        for(int v : chromo) {
+            if(mi[v] < MIN_MUTUAL_INFO) {
+                return false;
+            }
+        }
+        return true;
+    }
+    private static boolean isChromoValid(boolean[] chromo, int maxReg, double[] mi) {
+        int cnt = 0;
+        for(boolean b : chromo) {
+            if(b) {
+                ++cnt;
+            }
+        }
+        if(cnt > maxReg) {
+            return false;
+        }
+        for(int i = 0; i < chromo.length; ++i) {
+            if(chromo[i] && mi[i] < MIN_MUTUAL_INFO) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static double consistency(int[] chromo, boolean[][] data, int v) {
         Map<BitSet, Integer> map= new HashMap<>();
         int tie = 0;
         for(int i = 0; i < data.length - 1; ++i) {
@@ -207,8 +360,53 @@ public class Program {
                 map.put(b, prediction);
             }
         }
-        double C = (map.size() - tie) / (data.length - 1);
-        return 1 / ((1 - C) * GAMA + chromo.length);
+        return (double)(map.size() - tie) / (double)(data.length - 1);
+    }
+
+    private static double[][] mi(boolean[][] data) {
+        int m = data.length, n = data[0].length;
+        int[][] p = new int[n][2];
+        // conditional probability : 0|0, 0|1, 1|0, 1|1
+        int[][][] cond = new int[n][n][4];
+        for(boolean[] b : data) {
+            for(int j = 0; j < n; ++j) {
+                if(b[j]) {
+                    ++p[j][1];
+                    for(int k = 0; k < n; ++k) {
+                        if(b[k]) {
+                            // 11
+                            ++cond[j][k][3];
+                        } else {
+                            // 10
+                            ++cond[j][k][2];
+                        }
+                    }
+                } else {
+                    ++p[j][0];
+                    for(int k = 0; k < n; ++k) {
+                        if(b[k]) {
+                            // 01
+                            ++cond[j][k][1];
+                        } else {
+                            // 00
+                            ++cond[j][k][0];
+                        }
+                    }
+                }
+            }
+        }
+        double[][] mi = new double[n][n];
+        for(int i = 0; i < n; ++i) {
+            for(int j = 0; j < n; ++j) {
+                for(int k = 0; k < 4; ++k) {
+                    if(cond[i][j][k] != 0) {
+                        mi[i][j] += (double)cond[i][j][k] / m
+                                * Math.log((double)cond[i][j][k] / p[i][0] / p[i][1] * m);
+                    }
+                }
+            }
+        }
+        return mi;
     }
 
 }
